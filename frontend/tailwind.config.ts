@@ -33,6 +33,7 @@ const config: Config = {
         'fade-in': 'fadeIn 0.3s ease-in-out',
         'score-bump': 'scoreBump 0.4s ease-out',
         'llr-glow': 'llrGlow 4s ease-in-out infinite',
+        'slam-in': 'slamIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards',
       },
       keyframes: {
         fadeIn: {
@@ -47,6 +48,11 @@ const config: Config = {
         llrGlow: {
           '0%, 100%': { opacity: '0.5' },
           '50%': { opacity: '0.85' },
+        },
+        slamIn: {
+          '0%': { opacity: '0', transform: 'scale(3) rotate(-5deg)' },
+          '60%': { opacity: '1', transform: 'scale(0.95) rotate(1deg)' },
+          '100%': { opacity: '1', transform: 'scale(1) rotate(0deg)' },
         },
       },
     },
