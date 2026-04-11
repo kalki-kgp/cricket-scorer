@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { getSocket } from '@/lib/socket';
-import type { Match, MatchState } from '@/types/cricket';
+import type { BallEntry, Match, MatchState } from '@/types/cricket';
+
+const RECENT_BALLS_SHOWN = 10;
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -20,6 +22,48 @@ function matchStatus(m: Match) {
   if (m.is_completed) return 'done';
   if (m.is_live) return 'live';
   return 'upcoming';
+}
+
+function RecentDeliveries({ balls }: { balls: BallEntry[] }) {
+  const recent = balls.slice(-RECENT_BALLS_SHOWN);
+  if (recent.length === 0) return null;
+  const newestId = recent[recent.length - 1]?.id;
+
+  return (
+    <div className="mb-5">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <p className="text-[10px] font-display font-bold uppercase tracking-[0.2em] text-llr-muted">
+          Recent deliveries
+        </p>
+        <p className="text-[9px] text-llr-muted/70 font-mono hidden sm:block">
+          older ← · → newer
+        </p>
+      </div>
+      <div className="llr-card-muted rounded-xl p-3 sm:p-4 overflow-x-auto">
+        <div className="flex gap-2 min-w-min pr-1">
+          {recent.map((b) => {
+            const isLatest = b.id === newestId;
+            return (
+              <div
+                key={b.id}
+                className={`flex flex-col items-center justify-center gap-0.5 min-w-[2.75rem] sm:min-w-[3.25rem] shrink-0 rounded-lg px-1.5 py-2 transition-transform ${lastBallClass(
+                  b.result
+                )} ${isLatest ? 'ring-2 ring-llr-saffron-glow/90 ring-offset-2 ring-offset-[#0a1018] scale-[1.02]' : 'opacity-95'}`}
+                title={`Over ${b.over_num}, ball ${b.ball_num}`}
+              >
+                <span className="font-mono font-bold text-sm sm:text-base leading-none tabular-nums">
+                  {b.result}
+                </span>
+                <span className="text-[8px] sm:text-[9px] font-mono opacity-80 tabular-nums leading-none">
+                  {b.over_num}.{b.ball_num}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Components ─────────────────────────────────────────────────
@@ -220,6 +264,8 @@ export default function LiveScoreboard({
                 </span>
               </div>
             </div>
+
+            <RecentDeliveries balls={data?.balls ?? []} />
 
             {liveMatch.last_ball_result && (
               <div className="flex justify-center mb-5">

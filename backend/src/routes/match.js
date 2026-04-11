@@ -12,7 +12,7 @@ function getMatchState(matchId) {
     'SELECT * FROM bowler WHERE match_id = ? ORDER BY bowler_id DESC LIMIT 1'
   ).get(matchId);
   const balls = db.prepare(
-    'SELECT * FROM ball_log WHERE match_id = ? ORDER BY id DESC LIMIT 14'
+    'SELECT * FROM ball_log WHERE match_id = ? ORDER BY id DESC LIMIT 30'
   ).all(matchId).reverse();
   return { match, batsmen, bowler: bowler || null, balls };
 }
