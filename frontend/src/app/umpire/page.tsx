@@ -18,10 +18,12 @@ import {
   createMatch,
   patchMatch,
   moveMatch,
+  startSecondInnings,
   AuthError,
 } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import type { Match, MatchState, Batsman, Bowler, BallEntry } from '@/types/cricket';
+import { currentInnings, battingSideName, scheduleInningsScoreLine } from '@/types/cricket';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -242,10 +244,25 @@ function MatchDetailsModal({
             {match.team_a_name} <span className="text-llr-muted font-normal text-sm">vs</span> {match.team_b_name}
           </p>
           {(match.is_live || match.is_paused || match.is_completed) && (
-            <div className="flex items-baseline gap-2 mt-2">
-              <span className="text-3xl font-mono font-bold tabular-nums text-llr-cream">{match.runs}<span className="text-llr-brick">/{match.wickets}</span></span>
-              <span className="text-sm text-llr-muted font-mono">{match.overs}.{match.balls_in_over} ov</span>
-              <span className="text-xs text-llr-muted">({match.overs_limit} ov match)</span>
+            <div className="mt-2 space-y-2">
+              <p className="text-[10px] font-display font-bold text-llr-pitch-bright uppercase tracking-widest">
+                {currentInnings(match) === 1 ? '1st innings' : '2nd innings'} · batting {battingSideName(match)}
+              </p>
+              {currentInnings(match) >= 2 && (
+                <p className="text-xs text-llr-muted font-mono">
+                  1st: {match.innings1_runs ?? 0}/{match.innings1_wickets ?? 0} ({match.innings1_overs ?? 0}.{(match.innings1_balls_in_over ?? 0)} ov)
+                </p>
+              )}
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-3xl font-mono font-bold tabular-nums text-llr-cream">{match.runs}<span className="text-llr-brick">/{match.wickets}</span></span>
+                <span className="text-sm text-llr-muted font-mono">{match.overs}.{match.balls_in_over} ov</span>
+                <span className="text-xs text-llr-muted">({match.overs_limit} ov match)</span>
+              </div>
+              {currentInnings(match) >= 2 && (
+                <p className="text-[11px] text-llr-pitch-bright font-display font-semibold">
+                  Target {(match.innings1_runs ?? 0) + 1} to win
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -358,10 +375,19 @@ function MatchRow({
           {isPaused && <p className="text-[10px] text-yellow-500/60 font-mono tracking-wide">PAUSED</p>}
         </button>
 
-        {/* Score badge */}
-        {(isDone || isPaused || isLive) && m.runs > 0 && (
-          <span className="text-xs text-llr-muted tabular-nums flex-shrink-0 font-mono">{m.runs}/{m.wickets}</span>
-        )}
+        {/* Score badge (supports two innings) */}
+        {(() => {
+          const line = scheduleInningsScoreLine(
+            m,
+            isDone ? 'done' : isPaused ? 'paused' : 'live'
+          );
+          if (!line) return null;
+          return (
+            <span className="text-[10px] sm:text-xs text-llr-muted tabular-nums flex-shrink-0 font-mono max-w-[7.5rem] sm:max-w-none truncate text-right">
+              {line}
+            </span>
+          );
+        })()}
 
         {/* Primary actions */}
         {!isDone && (
@@ -633,13 +659,27 @@ export default function UmpirePage() {
       const res: ActionResult = await quickAction(token, liveState.match.match_id, action, value);
       syncState(res.state);
       setAllMatches(prev => prev.map(m =>
-        m.match_id === res.state.match.match_id
-          ? { ...m, runs: res.state.match.runs, wickets: res.state.match.wickets }
-          : m
+        m.match_id === res.state.match.match_id ? { ...m, ...res.state.match } : m
       ));
     } catch (err) {
       if (err instanceof AuthError) { kickToLogin(); return; }
       showToast('Action failed');
+    } finally { setBusy(false); }
+  }
+
+  async function handleStartSecondInnings() {
+    if (!token || !liveState || busy) return;
+    setBusy(true);
+    try {
+      const res: ActionResult = await startSecondInnings(token, liveState.match.match_id);
+      syncState(res.state);
+      setAllMatches(prev => prev.map(m =>
+        m.match_id === res.state.match.match_id ? { ...m, ...res.state.match } : m
+      ));
+      showToast('2nd innings — ' + (liveState.match.team_b_name || 'Team B') + ' bats');
+    } catch (err) {
+      if (err instanceof AuthError) { kickToLogin(); return; }
+      showToast(err instanceof Error ? err.message : 'Could not start 2nd innings');
     } finally { setBusy(false); }
   }
 
@@ -649,6 +689,9 @@ export default function UmpirePage() {
     try {
       const res: ActionResult = await swapStrike(token, liveState.match.match_id);
       syncState(res.state);
+      setAllMatches(prev => prev.map(m =>
+        m.match_id === res.state.match.match_id ? { ...m, ...res.state.match } : m
+      ));
       showToast('Strike swapped');
     } catch (err) {
       if (err instanceof AuthError) { kickToLogin(); return; }
@@ -886,6 +929,9 @@ export default function UmpirePage() {
         </div>
         {live ? (
           <div className="text-right">
+            <p className="text-[9px] font-display font-bold text-llr-pitch-bright uppercase tracking-widest">
+              {currentInnings(live) === 1 ? '1st inns' : '2nd inns'}
+            </p>
             <p className="text-xl font-mono font-bold tabular-nums text-llr-cream">
               {live.runs}
               <span className="text-llr-brick">/{live.wickets}</span>
@@ -1076,6 +1122,39 @@ export default function UmpirePage() {
               <p className="text-llr-cream font-display font-bold">
                 {live.team_a_name} <span className="text-llr-muted font-sans font-medium">vs</span> {live.team_b_name}
               </p>
+            </div>
+
+            <div className="llr-card-muted rounded-xl border border-llr-pitch/25 p-4 text-center space-y-3">
+              <div>
+                <p className="text-[10px] font-display font-bold text-llr-saffron uppercase tracking-[0.25em]">
+                  {currentInnings(live) === 1 ? '1st innings' : '2nd innings'}
+                </p>
+                <p className="text-sm text-llr-cream mt-1.5">
+                  Batting:{' '}
+                  <span className="font-display font-bold text-llr-saffron-glow">{battingSideName(live)}</span>
+                </p>
+                {currentInnings(live) >= 2 && (
+                  <div className="text-xs text-llr-muted mt-2 font-mono space-y-1">
+                    <p>
+                      1st ({live.team_a_name}): {live.innings1_runs ?? 0}/{live.innings1_wickets ?? 0} ·{' '}
+                      {live.innings1_overs ?? 0}.{(live.innings1_balls_in_over ?? 0)} ov
+                    </p>
+                    <p className="text-llr-pitch-bright font-display font-semibold">
+                      Target {(live.innings1_runs ?? 0) + 1} to win
+                    </p>
+                  </div>
+                )}
+              </div>
+              {currentInnings(live) === 1 && (
+                <button
+                  type="button"
+                  onClick={handleStartSecondInnings}
+                  disabled={busy}
+                  className="w-full py-3 rounded-xl font-display font-bold text-sm bg-llr-pitch/20 hover:bg-llr-pitch/30 border border-llr-pitch-bright/35 text-llr-pitch-bright transition disabled:opacity-40"
+                >
+                  End 1st innings · Start 2nd ({live.team_b_name})
+                </button>
+              )}
             </div>
 
             {/* Ball log */}

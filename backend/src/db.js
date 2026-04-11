@@ -43,6 +43,32 @@ colNames.forEach((col, i) => {
   }
 });
 
+// ── Innings columns (2-innings match: A bats 1st, B chases in 2nd) ──
+const matchColsNow = db
+  .prepare('PRAGMA table_info(match)')
+  .all()
+  .map((c) => c.name);
+const inningsCols = [
+  'current_innings',
+  'innings1_runs',
+  'innings1_wickets',
+  'innings1_overs',
+  'innings1_balls_in_over',
+];
+const inningsMigrations = [
+  'ALTER TABLE match ADD COLUMN current_innings INTEGER NOT NULL DEFAULT 1',
+  'ALTER TABLE match ADD COLUMN innings1_runs INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE match ADD COLUMN innings1_wickets INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE match ADD COLUMN innings1_overs INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE match ADD COLUMN innings1_balls_in_over INTEGER NOT NULL DEFAULT 0',
+];
+inningsCols.forEach((col, i) => {
+  if (!matchColsNow.includes(col)) {
+    db.exec(inningsMigrations[i]);
+    console.log(`[db] Added missing column: ${col}`);
+  }
+});
+
 // ── ball_log table (safe to re-run) ──────────────────────────
 db.exec(`
   CREATE TABLE IF NOT EXISTS ball_log (
@@ -56,5 +82,11 @@ db.exec(`
     FOREIGN KEY (match_id) REFERENCES match(match_id) ON DELETE CASCADE
   )
 `);
+
+const ballLogCols = db.prepare('PRAGMA table_info(ball_log)').all().map((c) => c.name);
+if (!ballLogCols.includes('innings')) {
+  db.exec('ALTER TABLE ball_log ADD COLUMN innings INTEGER NOT NULL DEFAULT 1');
+  console.log('[db] Added missing column: ball_log.innings');
+}
 
 module.exports = db;

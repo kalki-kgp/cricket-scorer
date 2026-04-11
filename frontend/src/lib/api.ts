@@ -101,6 +101,10 @@ export function completeMatch(token: string, match_id: number) {
   return authedPost(`/matches/${match_id}/complete`, token, {});
 }
 
+export function startSecondInnings(token: string, match_id: number) {
+  return authedPost('/start-second-innings', token, { match_id });
+}
+
 export async function fetchAllSquads(): Promise<Record<string, string[]>> {
   try {
     const res = await fetch(`${API_URL}/api/teams`, { cache: 'no-store' });

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { getSocket } from '@/lib/socket';
 import type { BallEntry, Match, MatchState } from '@/types/cricket';
+import { battingSideName, currentInnings, scheduleInningsScoreLine } from '@/types/cricket';
 import WelcomeIntro from './WelcomeIntro';
 import BallEventOverlay from './BallEventOverlay';
 import ShareableMatchCard from './ShareableMatchCard';
@@ -116,9 +117,14 @@ function ScheduleRow({ m, onShare }: { m: Match; onShare: (m: Match) => void }) 
           LIVE
         </span>
       )}
-      {status === 'done' && m.runs > 0 && (
-        <span className="text-xs text-llr-muted tabular-nums font-mono">
-          {m.runs}/{m.wickets}
+      {status === 'live' && scheduleInningsScoreLine(m, 'live') && (
+        <span className="text-[10px] sm:text-xs text-llr-muted tabular-nums font-mono max-w-[6.5rem] sm:max-w-none truncate">
+          {scheduleInningsScoreLine(m, 'live')}
+        </span>
+      )}
+      {status === 'done' && scheduleInningsScoreLine(m, 'done') && (
+        <span className="text-[10px] sm:text-xs text-llr-muted tabular-nums font-mono max-w-[6.5rem] sm:max-w-none truncate text-right">
+          {scheduleInningsScoreLine(m, 'done')}
         </span>
       )}
       {(status === 'live' || (status === 'done' && m.runs > 0)) && (
@@ -292,6 +298,27 @@ export default function LiveScoreboard({
                 LIVE NOW
               </span>
               <span className="text-xs text-llr-saffron/80 font-mono tabular-nums">{liveMatch.time_slot}</span>
+            </div>
+
+            <div className="mb-4 text-center">
+              <p className="inline-flex flex-col sm:flex-row sm:items-center sm:justify-center gap-1 sm:gap-3">
+                <span className="text-[11px] font-display font-bold text-llr-saffron uppercase tracking-[0.2em]">
+                  {currentInnings(liveMatch) === 1 ? '1st innings' : '2nd innings'}
+                </span>
+                <span className="hidden sm:inline text-llr-muted/40">·</span>
+                <span className="text-xs text-llr-cream">
+                  Batting: <span className="font-display font-bold text-llr-saffron-glow">{battingSideName(liveMatch)}</span>
+                </span>
+              </p>
+              {currentInnings(liveMatch) >= 2 && (
+                <p className="text-xs text-llr-muted font-mono mt-2">
+                  1st ({liveMatch.team_a_name}): {liveMatch.innings1_runs ?? 0}/{liveMatch.innings1_wickets ?? 0} ·{' '}
+                  {liveMatch.innings1_overs ?? 0}.{(liveMatch.innings1_balls_in_over ?? 0)} ov
+                  <span className="block sm:inline sm:ml-2 mt-1 sm:mt-0 text-llr-pitch-bright font-display font-semibold">
+                    Target {(liveMatch.innings1_runs ?? 0) + 1} to win
+                  </span>
+                </p>
+              )}
             </div>
 
             <div className="text-center mb-5">

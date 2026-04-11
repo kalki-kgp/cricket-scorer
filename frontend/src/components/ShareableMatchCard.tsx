@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react';
 import type { Match, MatchState } from '@/types/cricket';
+import { currentInnings } from '@/types/cricket';
 
 // Dynamic import for html2canvas to avoid SSR issues
 async function captureCard(element: HTMLElement): Promise<Blob | null> {
@@ -141,21 +142,40 @@ export default function ShareableMatchCard({
         </div>
 
         {/* Score */}
-        <div className="rounded-xl bg-white/[0.04] border border-white/[0.06] p-4 text-center mb-4">
-          <div className="flex items-baseline justify-center gap-1.5">
-            <span className="text-5xl sm:text-6xl font-mono font-bold tabular-nums text-llr-cream leading-none">
-              {match.runs}
-            </span>
-            <span className="text-3xl sm:text-4xl font-mono font-semibold text-llr-brick leading-none">
-              /{match.wickets}
-            </span>
-          </div>
-          <p className="text-sm text-llr-pitch-bright font-display font-semibold mt-2">
-            {match.overs}.{match.balls_in_over} overs
-            {match.overs_limit > 0 && (
-              <span className="text-llr-muted"> / {match.overs_limit}</span>
+        <div className="rounded-xl bg-white/[0.04] border border-white/[0.06] p-4 text-center mb-4 space-y-3">
+          {(currentInnings(match) >= 2 || (match.innings1_runs ?? 0) > 0 || (match.innings1_wickets ?? 0) > 0) && (
+            <div className="text-left text-[10px] text-llr-muted font-mono border-b border-white/[0.06] pb-2 mb-1">
+              <span className="text-llr-muted/80 font-display uppercase tracking-wider text-[9px]">1st inns</span>
+              <span className="block text-llr-cream font-bold text-sm mt-0.5">
+                {match.team_a_name}: {match.innings1_runs ?? 0}/{match.innings1_wickets ?? 0} · {match.innings1_overs ?? 0}.
+                {match.innings1_balls_in_over ?? 0} ov
+              </span>
+            </div>
+          )}
+          <div>
+            <p className="text-[9px] font-display font-bold text-llr-saffron uppercase tracking-widest mb-1">
+              {currentInnings(match) >= 2 ? '2nd innings' : '1st innings'}
+            </p>
+            <div className="flex items-baseline justify-center gap-1.5">
+              <span className="text-5xl sm:text-6xl font-mono font-bold tabular-nums text-llr-cream leading-none">
+                {match.runs}
+              </span>
+              <span className="text-3xl sm:text-4xl font-mono font-semibold text-llr-brick leading-none">
+                /{match.wickets}
+              </span>
+            </div>
+            <p className="text-sm text-llr-pitch-bright font-display font-semibold mt-2">
+              {match.overs}.{match.balls_in_over} overs
+              {match.overs_limit > 0 && (
+                <span className="text-llr-muted"> / {match.overs_limit}</span>
+              )}
+            </p>
+            {currentInnings(match) >= 2 && (
+              <p className="text-xs text-llr-pitch-bright font-display font-bold mt-1">
+                Target {(match.innings1_runs ?? 0) + 1} to win
+              </p>
             )}
-          </p>
+          </div>
         </div>
 
         {/* Stats row */}

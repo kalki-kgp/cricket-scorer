@@ -11,10 +11,42 @@ function getMatchState(matchId) {
   const bowler = db.prepare(
     'SELECT * FROM bowler WHERE match_id = ? ORDER BY bowler_id DESC LIMIT 1'
   ).get(matchId);
+  const inn = match.current_innings ?? 1;
   const balls = db.prepare(
-    'SELECT * FROM ball_log WHERE match_id = ? ORDER BY id DESC LIMIT 30'
-  ).all(matchId).reverse();
+    'SELECT * FROM ball_log WHERE match_id = ? AND innings = ? ORDER BY id DESC LIMIT 30'
+  ).all(matchId, inn).reverse();
   return { match, batsmen, bowler: bowler || null, balls };
+}
+
+function startSecondInningsCore(io, matchId, res) {
+  if (!Number.isFinite(matchId) || matchId < 1) {
+    return res.status(400).json({ error: 'Invalid match id' });
+  }
+  const row = db.prepare('SELECT * FROM match WHERE match_id = ?').get(matchId);
+  if (!row) return res.status(404).json({ error: 'Match not found' });
+  if (!row.is_live) return res.status(400).json({ error: 'Match must be live' });
+  if ((row.current_innings ?? 1) !== 1) {
+    return res.status(400).json({ error: 'Already in 2nd innings' });
+  }
+
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE match SET
+        innings1_runs = ?, innings1_wickets = ?, innings1_overs = ?, innings1_balls_in_over = ?,
+        runs = 0, wickets = 0, overs = 0, balls_in_over = 0, last_ball_result = '',
+        current_innings = 2
+      WHERE match_id = ?
+    `).run(row.runs, row.wickets, row.overs, row.balls_in_over, matchId);
+    db.prepare('UPDATE batsman SET runs = 0, balls = 0 WHERE match_id = ?').run(matchId);
+    db.prepare(
+      'UPDATE bowler SET overs = 0, balls_bowled = 0, runs_given = 0, wickets = 0 WHERE match_id = ?'
+    ).run(matchId);
+  })();
+
+  const state = getMatchState(matchId);
+  io.to(`match_${matchId}`).emit('score_update', state);
+  io.emit('schedule_update', db.prepare('SELECT * FROM match ORDER BY match_order ASC').all());
+  return res.json({ success: true, state });
 }
 
 module.exports = function (io) {
@@ -180,7 +212,9 @@ module.exports = function (io) {
         db.prepare(`
           UPDATE match
           SET is_live = 1, is_paused = 0, is_completed = 0,
-              runs = 0, wickets = 0, overs = 0, balls_in_over = 0, last_ball_result = ''
+              runs = 0, wickets = 0, overs = 0, balls_in_over = 0, last_ball_result = '',
+              current_innings = 1,
+              innings1_runs = 0, innings1_wickets = 0, innings1_overs = 0, innings1_balls_in_over = 0
           WHERE match_id = ?
         `).run(matchId);
         db.prepare(
@@ -215,6 +249,20 @@ module.exports = function (io) {
     io.emit('schedule_update', matches);
     io.emit('score_update', null);
     res.json({ success: true, matches });
+  });
+
+  // ── POST /api/start-second-innings ── body: { match_id } (same as quick-action / swap-strike style)
+  router.post('/start-second-innings', verifyToken, (req, res) => {
+    const matchId = parseInt(req.body?.match_id, 10);
+    if (Number.isNaN(matchId)) {
+      return res.status(400).json({ error: 'match_id required' });
+    }
+    return startSecondInningsCore(io, matchId, res);
+  });
+
+  // ── POST /api/matches/:id/start-second-innings ── alias (older clients / docs)
+  router.post('/matches/:id/start-second-innings', verifyToken, (req, res) => {
+    return startSecondInningsCore(io, parseInt(req.params.id, 10), res);
   });
 
   // ── GET /api/teams ── all team squads
@@ -255,13 +303,19 @@ module.exports = function (io) {
           UPDATE match
           SET title=?, team_a_name=?, team_b_name=?,
               runs=?, wickets=?, overs=?, balls_in_over=?, last_ball_result=?,
-              overs_limit=?
+              overs_limit=?,
+              current_innings=?, innings1_runs=?, innings1_wickets=?, innings1_overs=?, innings1_balls_in_over=?
           WHERE match_id=?
         `).run(
           match.title, match.team_a_name, match.team_b_name,
           match.runs, match.wickets, match.overs,
           match.balls_in_over, match.last_ball_result,
           match.overs_limit ?? 6,
+          match.current_innings ?? 1,
+          match.innings1_runs ?? 0,
+          match.innings1_wickets ?? 0,
+          match.innings1_overs ?? 0,
+          match.innings1_balls_in_over ?? 0,
           match_id
         );
       }
@@ -390,10 +444,11 @@ module.exports = function (io) {
           throw new Error(`Unknown action: ${action}`);
       }
 
+      const inn = matchRow.current_innings ?? 1;
       // Log the ball (capture current over/ball before progression)
       db.prepare(
-        'INSERT INTO ball_log (match_id, over_num, ball_num, result, runs, is_legal) VALUES (?, ?, ?, ?, ?, ?)'
-      ).run(match_id, matchRow.overs, matchRow.balls_in_over + 1, ballResult, ballRuns, legalDelivery ? 1 : 0);
+        'INSERT INTO ball_log (match_id, over_num, ball_num, result, runs, is_legal, innings) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      ).run(match_id, matchRow.overs, matchRow.balls_in_over + 1, ballResult, ballRuns, legalDelivery ? 1 : 0, inn);
 
       // Manage over progression on legal deliveries
       if (legalDelivery) {
