@@ -143,7 +143,8 @@ export default function LiveScoreboard({
       socket.emit('join_match', initialData.match.match_id);
     }
 
-    socket.on('score_update', (updated: MatchState) => {
+    socket.on('score_update', (updated: MatchState | null) => {
+      if (!updated) { setData(null); return; }
       if (updated.match.runs !== prevRuns.current) {
         setScoreBump(true);
         setTimeout(() => setScoreBump(false), 500);

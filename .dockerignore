@@ -1,0 +1,8 @@
+# Host installs must not overwrite image node_modules (OS/arch mismatch breaks Next trace).
+**/node_modules
+
+# Stale or host builds must not be copied into the frontend builder.
+**/.next
+
+.git
+**/.DS_Store

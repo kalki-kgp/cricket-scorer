@@ -26,14 +26,18 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://llr-intra-hall-cricket-api.paperknife.app}
+        # NEXT_PUBLIC_* vars are baked at build time.
+        # Default to localhost:3006 for local dev; override for production deploys.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3006}
     ports:
       - '3005:3000'
     environment:
+      # Next standalone must bind 0.0.0.0 (Docker sets HOSTNAME to the container id by default).
+      HOSTNAME: '0.0.0.0'
       # Server-side SSR fetch uses Docker internal hostname
       API_URL_INTERNAL: http://backend:3001
-      # Browser-side socket/fetch uses public-facing URL
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://llr-intra-hall-cricket-api.paperknife.app}
+      # Runtime NEXT_PUBLIC_ vars are ignored — only the build-time ARG matters for browser code
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3006}
     depends_on:
       backend:
         condition: service_healthy

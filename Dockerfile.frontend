@@ -27,5 +27,8 @@ COPY --from=builder /app/public ./public
 
 EXPOSE 3000
 ENV PORT=3000
+# Docker sets HOSTNAME to the container id; Next standalone uses it as the bind address.
+# Without 0.0.0.0, published port :3000 can miss the listener or behave inconsistently.
+ENV HOSTNAME=0.0.0.0
 
 CMD ["node", "server.js"]
