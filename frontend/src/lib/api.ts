@@ -85,8 +85,8 @@ export function swapStrike(token: string, match_id: number) {
   return authedPost('/swap-strike', token, { match_id });
 }
 
-export function setMatchLive(token: string, match_id: number) {
-  return authedPost(`/matches/${match_id}/set-live`, token, {});
+export function setMatchLive(token: string, match_id: number, config: { overs_limit: number }) {
+  return authedPost(`/matches/${match_id}/set-live`, token, config);
 }
 
 export function pauseMatch(token: string, match_id: number) {
@@ -113,4 +113,34 @@ export async function fetchAllSquads(): Promise<Record<string, string[]>> {
 
 export function saveTeamSquad(token: string, teamName: string, players: string[]) {
   return authedPost(`/teams/${encodeURIComponent(teamName)}/players`, token, { players });
+}
+
+export async function fetchMatchById(matchId: number): Promise<MatchState | null> {
+  try {
+    const res = await fetch(`${API_URL}/api/matches/${matchId}`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export function createMatch(token: string, data: { team_a_name: string; team_b_name: string; time_slot: string; overs_limit: number }) {
+  return authedPost('/matches', token, data);
+}
+
+export function patchMatch(token: string, matchId: number, data: Partial<{ team_a_name: string; team_b_name: string; time_slot: string; overs_limit: number }>) {
+  return fetch(`${API_URL}/api/matches/${matchId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data),
+  }).then(async r => {
+    if (r.status === 401) throw new AuthError();
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error((e as { error?: string }).error || 'Request failed'); }
+    return r.json();
+  });
+}
+
+export function moveMatch(token: string, matchId: number, direction: 'up' | 'down') {
+  return authedPost(`/matches/${matchId}/move`, token, { direction });
 }

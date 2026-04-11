@@ -31,9 +31,10 @@ const colMigrations = [
   "ALTER TABLE match ADD COLUMN match_order   INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE match ADD COLUMN is_completed  INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE match ADD COLUMN is_paused     INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE match ADD COLUMN overs_limit   INTEGER NOT NULL DEFAULT 6",
 ];
 
-const colNames = ['time_slot', 'match_order', 'is_completed', 'is_paused'];
+const colNames = ['time_slot', 'match_order', 'is_completed', 'is_paused', 'overs_limit'];
 
 colNames.forEach((col, i) => {
   if (!existingCols.includes(col)) {
@@ -41,5 +42,19 @@ colNames.forEach((col, i) => {
     console.log(`[db] Added missing column: ${col}`);
   }
 });
+
+// ── ball_log table (safe to re-run) ──────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ball_log (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id  INTEGER NOT NULL,
+    over_num  INTEGER NOT NULL,
+    ball_num  INTEGER NOT NULL,
+    result    TEXT    NOT NULL,
+    runs      INTEGER NOT NULL DEFAULT 0,
+    is_legal  INTEGER NOT NULL DEFAULT 1,
+    FOREIGN KEY (match_id) REFERENCES match(match_id) ON DELETE CASCADE
+  )
+`);
 
 module.exports = db;

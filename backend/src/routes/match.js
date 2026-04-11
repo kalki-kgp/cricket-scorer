@@ -11,7 +11,10 @@ function getMatchState(matchId) {
   const bowler = db.prepare(
     'SELECT * FROM bowler WHERE match_id = ? ORDER BY bowler_id DESC LIMIT 1'
   ).get(matchId);
-  return { match, batsmen, bowler: bowler || null };
+  const balls = db.prepare(
+    'SELECT * FROM ball_log WHERE match_id = ? ORDER BY id DESC LIMIT 14'
+  ).all(matchId).reverse();
+  return { match, batsmen, bowler: bowler || null, balls };
 }
 
 module.exports = function (io) {
@@ -25,6 +28,95 @@ module.exports = function (io) {
     res.json(matches);
   });
 
+  // ── GET /api/matches/:id ── full state for any single match
+  router.get('/matches/:id', (req, res) => {
+    const matchId = parseInt(req.params.id);
+    const state = getMatchState(matchId);
+    if (!state) return res.status(404).json({ error: 'Match not found' });
+    res.json(state);
+  });
+
+  // ── POST /api/matches ── create a new match
+  router.post('/matches', verifyToken, (req, res) => {
+    const { team_a_name, team_b_name, time_slot, overs_limit } = req.body;
+    if (!team_a_name || !team_b_name) {
+      return res.status(400).json({ error: 'team_a_name and team_b_name required' });
+    }
+    const maxOrder = db.prepare('SELECT COALESCE(MAX(match_order), 0) AS m FROM match').get().m;
+    const order = maxOrder + 1;
+    const title = `${team_a_name} vs ${team_b_name}`;
+
+    const insertMatch = db.prepare(
+      'INSERT INTO match (title, team_a_name, team_b_name, time_slot, match_order, overs_limit) VALUES (?, ?, ?, ?, ?, ?)'
+    );
+    const insertBatsman = db.prepare(
+      'INSERT INTO batsman (match_id, name, runs, balls, is_striker, position) VALUES (?, ?, 0, 0, ?, ?)'
+    );
+    const insertBowler = db.prepare(
+      'INSERT INTO bowler (match_id, name, overs, runs_given, wickets) VALUES (?, ?, 0, 0, 0)'
+    );
+
+    let newMatchId;
+    db.transaction(() => {
+      const { lastInsertRowid: mid } = insertMatch.run(
+        title, team_a_name, team_b_name,
+        time_slot || '', overs_limit || 6
+      );
+      newMatchId = mid;
+      insertBatsman.run(mid, 'Batsman 1', 1, 1);
+      insertBatsman.run(mid, 'Batsman 2', 0, 2);
+      insertBowler.run(mid, 'Bowler 1');
+    })();
+
+    const matches = db.prepare('SELECT * FROM match ORDER BY match_order ASC').all();
+    io.emit('schedule_update', matches);
+    res.json({ success: true, match_id: newMatchId, matches });
+  });
+
+  // ── PATCH /api/matches/:id ── edit match metadata
+  router.patch('/matches/:id', verifyToken, (req, res) => {
+    const matchId = parseInt(req.params.id);
+    const target = db.prepare('SELECT * FROM match WHERE match_id = ?').get(matchId);
+    if (!target) return res.status(404).json({ error: 'Match not found' });
+
+    const teamA = req.body.team_a_name ?? target.team_a_name;
+    const teamB = req.body.team_b_name ?? target.team_b_name;
+    const timeSlot = req.body.time_slot ?? target.time_slot;
+    const oversLimit = req.body.overs_limit ?? target.overs_limit;
+    const title = `${teamA} vs ${teamB}`;
+
+    db.prepare(
+      'UPDATE match SET title=?, team_a_name=?, team_b_name=?, time_slot=?, overs_limit=? WHERE match_id=?'
+    ).run(title, teamA, teamB, timeSlot, oversLimit, matchId);
+
+    const matches = db.prepare('SELECT * FROM match ORDER BY match_order ASC').all();
+    io.emit('schedule_update', matches);
+    res.json({ success: true, matches });
+  });
+
+  // ── POST /api/matches/:id/move ── reorder (swap with neighbour)
+  router.post('/matches/:id/move', verifyToken, (req, res) => {
+    const matchId = parseInt(req.params.id);
+    const { direction } = req.body; // 'up' | 'down'
+    const current = db.prepare('SELECT match_id, match_order FROM match WHERE match_id = ?').get(matchId);
+    if (!current) return res.status(404).json({ error: 'Match not found' });
+
+    const neighbour = direction === 'up'
+      ? db.prepare('SELECT match_id, match_order FROM match WHERE match_order < ? ORDER BY match_order DESC LIMIT 1').get(current.match_order)
+      : db.prepare('SELECT match_id, match_order FROM match WHERE match_order > ? ORDER BY match_order ASC  LIMIT 1').get(current.match_order);
+
+    if (!neighbour) return res.json({ success: true, matches: db.prepare('SELECT * FROM match ORDER BY match_order ASC').all() });
+
+    db.transaction(() => {
+      db.prepare('UPDATE match SET match_order=? WHERE match_id=?').run(neighbour.match_order, matchId);
+      db.prepare('UPDATE match SET match_order=? WHERE match_id=?').run(current.match_order, neighbour.match_id);
+    })();
+
+    const matches = db.prepare('SELECT * FROM match ORDER BY match_order ASC').all();
+    io.emit('schedule_update', matches);
+    res.json({ success: true, matches });
+  });
+
   // ── GET /api/match ── returns the currently live match
   router.get('/match', (req, res) => {
     const match = db.prepare('SELECT * FROM match WHERE is_live = 1').get();
@@ -35,6 +127,7 @@ module.exports = function (io) {
   // ── POST /api/matches/:id/set-live ── activate a match (deactivates others)
   router.post('/matches/:id/set-live', verifyToken, (req, res) => {
     const matchId = parseInt(req.params.id);
+    const { overs_limit } = req.body;
     const target = db.prepare('SELECT * FROM match WHERE match_id = ?').get(matchId);
     if (!target) return res.status(404).json({ error: 'Match not found' });
     if (target.is_completed) {
@@ -43,7 +136,11 @@ module.exports = function (io) {
 
     db.transaction(() => {
       db.prepare('UPDATE match SET is_live = 0').run(); // deactivate all
-      db.prepare('UPDATE match SET is_live = 1, is_paused = 0 WHERE match_id = ?').run(matchId);
+      if (overs_limit != null) {
+        db.prepare('UPDATE match SET is_live = 1, is_paused = 0, overs_limit = ? WHERE match_id = ?').run(overs_limit, matchId);
+      } else {
+        db.prepare('UPDATE match SET is_live = 1, is_paused = 0 WHERE match_id = ?').run(matchId);
+      }
     })();
 
     const state = getMatchState(matchId);
@@ -92,6 +189,7 @@ module.exports = function (io) {
         db.prepare(
           'UPDATE bowler SET overs = 0, balls_bowled = 0, runs_given = 0, wickets = 0 WHERE match_id = ?'
         ).run(matchId);
+        db.prepare('DELETE FROM ball_log WHERE match_id = ?').run(matchId);
       } else {
         db.prepare(
           'UPDATE match SET is_live = 1, is_paused = 0, is_completed = 0 WHERE match_id = ?'
@@ -156,12 +254,14 @@ module.exports = function (io) {
         db.prepare(`
           UPDATE match
           SET title=?, team_a_name=?, team_b_name=?,
-              runs=?, wickets=?, overs=?, balls_in_over=?, last_ball_result=?
+              runs=?, wickets=?, overs=?, balls_in_over=?, last_ball_result=?,
+              overs_limit=?
           WHERE match_id=?
         `).run(
           match.title, match.team_a_name, match.team_b_name,
           match.runs, match.wickets, match.overs,
           match.balls_in_over, match.last_ball_result,
+          match.overs_limit ?? 6,
           match_id
         );
       }
@@ -207,6 +307,8 @@ module.exports = function (io) {
     ).get(match_id);
 
     let legalDelivery = true;
+    let ballResult = '•';
+    let ballRuns = 0;
 
     // Wrap all writes in a single transaction for atomicity
     try {
@@ -214,9 +316,11 @@ module.exports = function (io) {
       switch (action) {
         case 'run': {
           const r = parseInt(value) || 0;
+          ballResult = r === 0 ? '•' : String(r);
+          ballRuns = r;
           db.prepare(
             'UPDATE match SET runs = runs + ?, last_ball_result = ? WHERE match_id = ?'
-          ).run(r, r === 0 ? '•' : String(r), match_id);
+          ).run(r, ballResult, match_id);
           if (striker) {
             db.prepare(
               'UPDATE batsman SET runs = runs + ?, balls = balls + 1 WHERE batsman_id = ?'
@@ -230,6 +334,7 @@ module.exports = function (io) {
           break;
         }
         case 'wide': {
+          ballResult = 'Wd'; ballRuns = 1; legalDelivery = false;
           db.prepare(
             'UPDATE match SET runs = runs + 1, last_ball_result = ? WHERE match_id = ?'
           ).run('Wd', match_id);
@@ -238,10 +343,10 @@ module.exports = function (io) {
               'UPDATE bowler SET runs_given = runs_given + 1 WHERE bowler_id = ?'
             ).run(currentBowler.bowler_id);
           }
-          legalDelivery = false;
           break;
         }
         case 'no_ball': {
+          ballResult = 'NB'; ballRuns = 1; legalDelivery = false;
           db.prepare(
             'UPDATE match SET runs = runs + 1, last_ball_result = ? WHERE match_id = ?'
           ).run('NB', match_id);
@@ -250,10 +355,10 @@ module.exports = function (io) {
               'UPDATE bowler SET runs_given = runs_given + 1 WHERE bowler_id = ?'
             ).run(currentBowler.bowler_id);
           }
-          legalDelivery = false;
           break;
         }
         case 'bye': {
+          ballResult = 'B'; ballRuns = 1;
           db.prepare(
             'UPDATE match SET runs = runs + 1, last_ball_result = ? WHERE match_id = ?'
           ).run('B', match_id);
@@ -265,6 +370,7 @@ module.exports = function (io) {
           break;
         }
         case 'wicket': {
+          ballResult = 'W'; ballRuns = 0;
           db.prepare(
             'UPDATE match SET wickets = wickets + 1, last_ball_result = ? WHERE match_id = ?'
           ).run('W', match_id);
@@ -284,14 +390,20 @@ module.exports = function (io) {
           throw new Error(`Unknown action: ${action}`);
       }
 
+      // Log the ball (capture current over/ball before progression)
+      db.prepare(
+        'INSERT INTO ball_log (match_id, over_num, ball_num, result, runs, is_legal) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(match_id, matchRow.overs, matchRow.balls_in_over + 1, ballResult, ballRuns, legalDelivery ? 1 : 0);
+
       // Manage over progression on legal deliveries
       if (legalDelivery) {
         const refreshed = db.prepare(
-          'SELECT balls_in_over FROM match WHERE match_id = ?'
+          'SELECT balls_in_over, overs_limit FROM match WHERE match_id = ?'
         ).get(match_id);
         const newBalls = refreshed.balls_in_over + 1;
+        const ballsPerOver = 6; // always 6 balls per over
 
-        if (newBalls >= 6) {
+        if (newBalls >= ballsPerOver) {
           db.prepare(
             'UPDATE match SET overs = overs + 1, balls_in_over = 0 WHERE match_id = ?'
           ).run(match_id);

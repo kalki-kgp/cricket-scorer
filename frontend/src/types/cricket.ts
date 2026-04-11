@@ -10,6 +10,7 @@ export interface Match {
   overs: number;
   balls_in_over: number;
   last_ball_result: string;
+  overs_limit: number;
   is_live: number;
   is_paused: number;
   is_completed: number;
@@ -35,8 +36,19 @@ export interface Bowler {
   wickets: number;
 }
 
+export interface BallEntry {
+  id: number;
+  match_id: number;
+  over_num: number;
+  ball_num: number;
+  result: string;
+  runs: number;
+  is_legal: number;
+}
+
 export interface MatchState {
   match: Match;
   batsmen: Batsman[];
   bowler: Bowler | null;
+  balls: BallEntry[];
 }
