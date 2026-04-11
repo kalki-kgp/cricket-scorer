@@ -6,11 +6,11 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     ports:
-      - '3001:3001'
+      - '3006:3001'
     environment:
       PORT: 3001
       JWT_SECRET: ${JWT_SECRET:-cricket_jwt_secret_please_change_in_prod}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      FRONTEND_URL: ${FRONTEND_URL:-https://llr-intra-hall-cricket.paperknife.app}
       DB_PATH: /app/data/cricket.db
     volumes:
       - cricket-data:/app/data
@@ -26,14 +26,14 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://llr-intra-hall-cricket-api.paperknife.app}
     ports:
-      - '3000:3000'
+      - '3005:3000'
     environment:
       # Server-side SSR fetch uses Docker internal hostname
       API_URL_INTERNAL: http://backend:3001
-      # Browser-side socket/fetch uses public-facing port
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+      # Browser-side socket/fetch uses public-facing URL
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://llr-intra-hall-cricket-api.paperknife.app}
     depends_on:
       backend:
         condition: service_healthy
