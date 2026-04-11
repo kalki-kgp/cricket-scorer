@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - '3001:3001'
+    environment:
+      PORT: 3001
+      JWT_SECRET: ${JWT_SECRET:-cricket_jwt_secret_please_change_in_prod}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      DB_PATH: /app/data/cricket.db
+    volumes:
+      - cricket-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'node', '-e', "require('http').get('http://localhost:3001/health', r => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+    ports:
+      - '3000:3000'
+    environment:
+      # Server-side SSR fetch uses Docker internal hostname
+      API_URL_INTERNAL: http://backend:3001
+      # Browser-side socket/fetch uses public-facing port
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  cricket-data:
