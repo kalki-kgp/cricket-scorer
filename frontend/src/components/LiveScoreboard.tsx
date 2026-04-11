@@ -3,6 +3,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { getSocket } from '@/lib/socket';
 import type { BallEntry, Match, MatchState } from '@/types/cricket';
+import WelcomeIntro from './WelcomeIntro';
+import BallEventOverlay from './BallEventOverlay';
+import ShareableMatchCard from './ShareableMatchCard';
 
 const RECENT_BALLS_SHOWN = 10;
 
@@ -68,7 +71,7 @@ function RecentDeliveries({ balls }: { balls: BallEntry[] }) {
 
 // ── Components ─────────────────────────────────────────────────
 
-function ScheduleRow({ m }: { m: Match }) {
+function ScheduleRow({ m, onShare }: { m: Match; onShare: (m: Match) => void }) {
   const status = matchStatus(m);
   return (
     <div
@@ -118,6 +121,17 @@ function ScheduleRow({ m }: { m: Match }) {
           {m.runs}/{m.wickets}
         </span>
       )}
+      {(status === 'live' || (status === 'done' && m.runs > 0)) && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onShare(m); }}
+          className="ml-1 p-1.5 rounded-lg hover:bg-white/[0.06] text-llr-muted hover:text-llr-saffron transition-colors flex-shrink-0"
+          title="Share scorecard"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }
@@ -136,6 +150,20 @@ export default function LiveScoreboard({
   const [scoreBump, setScoreBump] = useState(false);
   const prevRuns = useRef(initialData?.match.runs ?? 0);
 
+  // Welcome intro state — show once per session
+  const [showIntro, setShowIntro] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return !sessionStorage.getItem('llr_intro_seen');
+  });
+
+  // Ball event animation trigger
+  const [ballEventResult, setBallEventResult] = useState<string | null>(null);
+  const prevBallResult = useRef(initialData?.match.last_ball_result ?? '');
+
+  // Shareable card modal
+  const [showShareCard, setShowShareCard] = useState(false);
+  const [shareMatch, setShareMatch] = useState<Match | null>(null);
+
   useEffect(() => {
     const socket = getSocket();
 
@@ -148,6 +176,11 @@ export default function LiveScoreboard({
         setScoreBump(true);
         setTimeout(() => setScoreBump(false), 500);
         prevRuns.current = updated.match.runs;
+      }
+      // Trigger ball event animation if last_ball_result changed
+      if (updated.match.last_ball_result && updated.match.last_ball_result !== prevBallResult.current) {
+        setBallEventResult(updated.match.last_ball_result);
+        prevBallResult.current = updated.match.last_ball_result;
       }
       setData(updated);
       if (updated.match.match_id !== initialData?.match?.match_id) {
@@ -169,8 +202,42 @@ export default function LiveScoreboard({
 
   const liveMatch = data?.match ?? null;
 
+  const handleDismissIntro = () => {
+    sessionStorage.setItem('llr_intro_seen', '1');
+    setShowIntro(false);
+  };
+
+  const handleOpenShareCard = (match: Match) => {
+    setShareMatch(match);
+    setShowShareCard(true);
+  };
+
   return (
     <div className="llr-page text-llr-cream">
+      {/* ── Welcome Intro ─────────────────────────────────────── */}
+      {showIntro && <WelcomeIntro onEnter={handleDismissIntro} />}
+
+      {/* ── Ball Event Overlay ────────────────────────────────── */}
+      <BallEventOverlay lastBallResult={ballEventResult} />
+
+      {/* ── Shareable Card Modal ─────────────────────────────── */}
+      {showShareCard && shareMatch && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setShowShareCard(false)}>
+          <div className="relative max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setShowShareCard(false)}
+              className="absolute -top-3 -right-3 z-10 w-8 h-8 rounded-full bg-llr-panel border border-white/10 text-llr-cream flex items-center justify-center hover:bg-llr-panel2 transition-colors"
+            >
+              ✕
+            </button>
+            <ShareableMatchCard
+              data={shareMatch.match_id === data?.match?.match_id ? data : null}
+              match={shareMatch}
+            />
+          </div>
+        </div>
+      )}
+
       {/* ── Header ──────────────────────────────────────────────── */}
       <header className="border-b border-llr-saffron/20 bg-black/35 backdrop-blur-md">
         <div className="max-w-3xl mx-auto px-4 py-5 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
@@ -334,6 +401,21 @@ export default function LiveScoreboard({
                 </div>
               </div>
             )}
+
+            {/* Share this match */}
+            <div className="mt-5 flex justify-center">
+              <button
+                onClick={() => handleOpenShareCard(liveMatch)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full font-display font-bold text-xs tracking-wider uppercase
+                  bg-llr-saffron/10 border border-llr-saffron/25 text-llr-saffron hover:bg-llr-saffron/20
+                  transition-all duration-200 active:scale-95"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                </svg>
+                Share Scorecard
+              </button>
+            </div>
           </section>
         ) : (
           <div className="llr-card rounded-3xl text-center py-14 px-6 llr-reveal">
@@ -359,7 +441,7 @@ export default function LiveScoreboard({
             {schedule.length === 0 ? (
               <p className="text-llr-muted text-sm text-center py-8 font-medium">Loading schedule…</p>
             ) : (
-              schedule.map((m) => <ScheduleRow key={m.match_id} m={m} />)
+              schedule.map((m) => <ScheduleRow key={m.match_id} m={m} onShare={handleOpenShareCard} />)
             )}
           </div>
         </section>
