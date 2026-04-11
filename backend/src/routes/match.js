@@ -43,12 +43,66 @@ module.exports = function (io) {
 
     db.transaction(() => {
       db.prepare('UPDATE match SET is_live = 0').run(); // deactivate all
-      db.prepare('UPDATE match SET is_live = 1 WHERE match_id = ?').run(matchId);
+      db.prepare('UPDATE match SET is_live = 1, is_paused = 0 WHERE match_id = ?').run(matchId);
     })();
 
     const state = getMatchState(matchId);
     io.emit('schedule_update', db.prepare('SELECT * FROM match ORDER BY match_order ASC').all());
-    io.emit('score_update', state); // tell public page which match is now live
+    io.emit('score_update', state);
+    res.json({ success: true, state });
+  });
+
+  // ── POST /api/matches/:id/pause ── pause the live match
+  router.post('/matches/:id/pause', verifyToken, (req, res) => {
+    const matchId = parseInt(req.params.id);
+    const target = db.prepare('SELECT * FROM match WHERE match_id = ?').get(matchId);
+    if (!target) return res.status(404).json({ error: 'Match not found' });
+    if (!target.is_live) return res.status(400).json({ error: 'Match is not live' });
+
+    db.prepare(
+      'UPDATE match SET is_live = 0, is_paused = 1, is_completed = 0 WHERE match_id = ?'
+    ).run(matchId);
+
+    const matches = db.prepare('SELECT * FROM match ORDER BY match_order ASC').all();
+    io.emit('schedule_update', matches);
+    io.emit('score_update', null); // no live match
+    res.json({ success: true });
+  });
+
+  // ── POST /api/matches/:id/resume ── resume a paused match (optionally reset scores)
+  router.post('/matches/:id/resume', verifyToken, (req, res) => {
+    const matchId = parseInt(req.params.id);
+    const { reset } = req.body;
+    const target = db.prepare('SELECT * FROM match WHERE match_id = ?').get(matchId);
+    if (!target) return res.status(404).json({ error: 'Match not found' });
+    if (!target.is_paused) return res.status(400).json({ error: 'Match is not paused' });
+
+    db.transaction(() => {
+      db.prepare('UPDATE match SET is_live = 0').run(); // deactivate all first
+      if (reset) {
+        db.prepare(`
+          UPDATE match
+          SET is_live = 1, is_paused = 0, is_completed = 0,
+              runs = 0, wickets = 0, overs = 0, balls_in_over = 0, last_ball_result = ''
+          WHERE match_id = ?
+        `).run(matchId);
+        db.prepare(
+          'UPDATE batsman SET runs = 0, balls = 0 WHERE match_id = ?'
+        ).run(matchId);
+        db.prepare(
+          'UPDATE bowler SET overs = 0, balls_bowled = 0, runs_given = 0, wickets = 0 WHERE match_id = ?'
+        ).run(matchId);
+      } else {
+        db.prepare(
+          'UPDATE match SET is_live = 1, is_paused = 0, is_completed = 0 WHERE match_id = ?'
+        ).run(matchId);
+      }
+    })();
+
+    const state = getMatchState(matchId);
+    const matches = db.prepare('SELECT * FROM match ORDER BY match_order ASC').all();
+    io.emit('schedule_update', matches);
+    io.emit('score_update', state);
     res.json({ success: true, state });
   });
 
@@ -56,12 +110,40 @@ module.exports = function (io) {
   router.post('/matches/:id/complete', verifyToken, (req, res) => {
     const matchId = parseInt(req.params.id);
     db.prepare(
-      'UPDATE match SET is_live = 0, is_completed = 1 WHERE match_id = ?'
+      'UPDATE match SET is_live = 0, is_paused = 0, is_completed = 1 WHERE match_id = ?'
     ).run(matchId);
 
     const matches = db.prepare('SELECT * FROM match ORDER BY match_order ASC').all();
     io.emit('schedule_update', matches);
+    io.emit('score_update', null);
     res.json({ success: true, matches });
+  });
+
+  // ── GET /api/teams ── all team squads
+  router.get('/teams', (req, res) => {
+    const rows = db.prepare('SELECT team_name, player_name FROM team_players ORDER BY id ASC').all();
+    const result = {};
+    for (const row of rows) {
+      if (!result[row.team_name]) result[row.team_name] = [];
+      result[row.team_name].push(row.player_name);
+    }
+    res.json(result);
+  });
+
+  // ── POST /api/teams/:teamName/players ── replace squad for a team
+  router.post('/teams/:teamName/players', verifyToken, (req, res) => {
+    const teamName = decodeURIComponent(req.params.teamName);
+    const { players } = req.body;
+    if (!Array.isArray(players)) {
+      return res.status(400).json({ error: 'players must be an array' });
+    }
+    const filtered = players.map(p => String(p).trim()).filter(Boolean);
+    db.transaction(() => {
+      db.prepare('DELETE FROM team_players WHERE team_name = ?').run(teamName);
+      const insert = db.prepare('INSERT INTO team_players (team_name, player_name) VALUES (?, ?)');
+      for (const name of filtered) insert.run(teamName, name);
+    })();
+    res.json({ success: true, team: teamName, players: filtered });
   });
 
   // ── POST /api/update-score ── manual full-state update from umpire form

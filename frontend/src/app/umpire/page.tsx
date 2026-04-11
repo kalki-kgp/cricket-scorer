@@ -7,8 +7,12 @@ import {
   updateScore,
   swapStrike,
   setMatchLive,
+  pauseMatch,
+  resumeMatch,
   completeMatch,
   fetchAllMatches,
+  fetchAllSquads,
+  saveTeamSquad,
   checkAuth,
   AuthError,
 } from '@/lib/api';
@@ -23,30 +27,43 @@ type ActionResult = { success: boolean; state: MatchState };
 function MatchRow({
   m,
   onSetLive,
+  onPause,
+  onResume,
+  onResumeReset,
   onComplete,
   busy,
 }: {
   m: Match;
   onSetLive: () => void;
+  onPause: () => void;
+  onResume: () => void;
+  onResumeReset: () => void;
   onComplete: () => void;
   busy: boolean;
 }) {
   const isLive = Boolean(m.is_live);
+  const isPaused = Boolean(m.is_paused);
   const isDone = Boolean(m.is_completed);
 
   return (
     <div
       className={`flex items-center gap-3 px-4 py-3 border-b border-white/[0.06] last:border-0 transition-colors
         ${isLive ? 'bg-llr-saffron/10 border-l-2 border-l-llr-saffron' : ''}
+        ${isPaused ? 'bg-yellow-500/5 border-l-2 border-l-yellow-500/40' : ''}
         ${isDone ? 'opacity-40' : ''}
       `}
     >
-      {/* Status dot */}
+      {/* Status indicator */}
       <div className="w-5 flex-shrink-0 flex justify-center">
         {isLive ? (
           <span className="relative flex h-2.5 w-2.5">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-llr-saffron-glow opacity-75" />
             <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-llr-saffron" />
+          </span>
+        ) : isPaused ? (
+          <span className="flex gap-0.5">
+            <span className="w-[3px] h-3 rounded-sm bg-yellow-500/70" />
+            <span className="w-[3px] h-3 rounded-sm bg-yellow-500/70" />
           </span>
         ) : isDone ? (
           <svg className="w-3.5 h-3.5 text-llr-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -63,24 +80,59 @@ function MatchRow({
         <p className="text-sm text-llr-cream font-medium truncate">
           {m.team_a_name} <span className="text-llr-muted">vs</span> {m.team_b_name}
         </p>
+        {isPaused && <p className="text-[10px] text-yellow-500/60 font-mono tracking-wide">PAUSED</p>}
       </div>
 
-      {/* Score if done */}
-      {isDone && m.runs > 0 && (
+      {/* Score badge */}
+      {(isDone || isPaused) && m.runs > 0 && (
         <span className="text-xs text-llr-muted tabular-nums flex-shrink-0 font-mono">{m.runs}/{m.wickets}</span>
       )}
 
       {/* Actions */}
       {!isDone && (
-        <div className="flex gap-1.5 flex-shrink-0">
+        <div className="flex gap-1.5 flex-shrink-0 flex-wrap justify-end max-w-[160px]">
           {isLive ? (
-            <button
-              onClick={onComplete}
-              disabled={busy}
-              className="text-xs px-2.5 py-1.5 rounded-lg bg-llr-panel2 hover:bg-llr-brick-deep/80 text-llr-cream/90 hover:text-white border border-white/10 hover:border-llr-brick/60 transition disabled:opacity-40 font-medium"
-            >
-              Done
-            </button>
+            <>
+              <button
+                onClick={onPause}
+                disabled={busy}
+                className="text-xs px-2.5 py-1.5 rounded-lg bg-yellow-500/15 hover:bg-yellow-500/25 text-yellow-400 border border-yellow-500/30 transition disabled:opacity-40 font-medium"
+              >
+                Pause
+              </button>
+              <button
+                onClick={onComplete}
+                disabled={busy}
+                className="text-xs px-2.5 py-1.5 rounded-lg bg-llr-panel2 hover:bg-llr-brick-deep/80 text-llr-cream/90 hover:text-white border border-white/10 hover:border-llr-brick/60 transition disabled:opacity-40 font-medium"
+              >
+                Done
+              </button>
+            </>
+          ) : isPaused ? (
+            <>
+              <button
+                onClick={onResume}
+                disabled={busy}
+                className="text-xs px-2 py-1.5 rounded-lg bg-llr-saffron/15 hover:bg-llr-saffron/25 text-llr-saffron-glow border border-llr-saffron/35 transition disabled:opacity-40 font-display font-semibold"
+              >
+                Resume
+              </button>
+              <button
+                onClick={onResumeReset}
+                disabled={busy}
+                className="text-xs px-2 py-1.5 rounded-lg bg-llr-panel2 hover:bg-llr-panel text-llr-cream/70 border border-white/10 transition disabled:opacity-40 font-medium"
+                title="Resume with scores reset to 0"
+              >
+                Reset
+              </button>
+              <button
+                onClick={onComplete}
+                disabled={busy}
+                className="text-xs px-2 py-1.5 rounded-lg bg-llr-panel2 hover:bg-llr-brick-deep/80 text-llr-cream/90 hover:text-white border border-white/10 hover:border-llr-brick/60 transition disabled:opacity-40 font-medium"
+              >
+                Done
+              </button>
+            </>
           ) : (
             <button
               onClick={onSetLive}
@@ -108,6 +160,11 @@ export default function UmpirePage() {
   const [lastActionLabel, setLastActionLabel] = useState('');
   const [toast, setToast] = useState('');
   const [scheduleOpen, setScheduleOpen] = useState(true);
+  const [squadsOpen, setSquadsOpen] = useState(false);
+  const [squadDraft, setSquadDraft] = useState<Record<string, string[]>>({});
+  const [expandedTeam, setExpandedTeam] = useState<string | null>(null);
+  const [savingSquad, setSavingSquad] = useState<string | null>(null);
+  const [squadsLoaded, setSquadsLoaded] = useState(false);
 
   function showToast(msg: string) {
     setToast(msg);
@@ -240,6 +297,7 @@ export default function UmpirePage() {
       setAllMatches(prev => prev.map(m => ({
         ...m,
         is_live: m.match_id === matchId ? 0 : m.is_live,
+        is_paused: m.match_id === matchId ? 0 : m.is_paused,
         is_completed: m.match_id === matchId ? 1 : m.is_completed,
       })));
       setLiveState(null);
@@ -248,6 +306,44 @@ export default function UmpirePage() {
     } catch (err) {
       if (err instanceof AuthError) { kickToLogin(); return; }
       showToast('Failed to complete match');
+    } finally { setBusy(false); }
+  }
+
+  async function handlePause(matchId: number) {
+    if (!token || busy) return;
+    setBusy(true);
+    try {
+      await pauseMatch(token, matchId);
+      setAllMatches(prev => prev.map(m => ({
+        ...m,
+        is_live: m.match_id === matchId ? 0 : m.is_live,
+        is_paused: m.match_id === matchId ? 1 : m.is_paused,
+      })));
+      setLiveState(null);
+      setForm(null);
+      showToast('Match paused');
+    } catch (err) {
+      if (err instanceof AuthError) { kickToLogin(); return; }
+      showToast('Failed to pause match');
+    } finally { setBusy(false); }
+  }
+
+  async function handleResume(matchId: number, reset: boolean) {
+    if (!token || busy) return;
+    setBusy(true);
+    try {
+      const res = await resumeMatch(token, matchId, reset);
+      syncState(res.state);
+      setAllMatches(prev => prev.map(m => ({
+        ...m,
+        is_live: m.match_id === matchId ? 1 : 0,
+        is_paused: m.match_id === matchId ? 0 : m.is_paused,
+      })));
+      getSocket().emit('join_match', matchId);
+      showToast(reset ? 'Match reset & resumed' : 'Match resumed');
+    } catch (err) {
+      if (err instanceof AuthError) { kickToLogin(); return; }
+      showToast('Failed to resume match');
     } finally { setBusy(false); }
   }
 
@@ -338,10 +434,119 @@ export default function UmpirePage() {
                     key={m.match_id}
                     m={m}
                     onSetLive={() => handleSetLive(m.match_id)}
+                    onPause={() => handlePause(m.match_id)}
+                    onResume={() => handleResume(m.match_id, false)}
+                    onResumeReset={() => handleResume(m.match_id, true)}
                     onComplete={() => handleComplete(m.match_id)}
                     busy={busy}
                   />
                 ))
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* ── Team Squads ──────────────────────────────────────── */}
+        <section className="llr-card-muted rounded-xl border border-llr-saffron/15 overflow-hidden">
+          <button
+            onClick={() => {
+              setSquadsOpen(o => !o);
+              if (!squadsLoaded) {
+                fetchAllSquads().then(data => {
+                  setSquadDraft(JSON.parse(JSON.stringify(data)));
+                  setSquadsLoaded(true);
+                });
+              }
+            }}
+            className="w-full flex items-center justify-between px-4 py-3 text-left"
+          >
+            <h3 className="text-[10px] font-display font-bold text-llr-saffron uppercase tracking-[0.2em]">
+              Team Squads
+            </h3>
+            <svg
+              className={`w-4 h-4 text-llr-muted transition-transform ${squadsOpen ? 'rotate-180' : ''}`}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {squadsOpen && (
+            <div className="border-t border-white/[0.06]">
+              {!squadsLoaded ? (
+                <p className="text-llr-muted text-sm text-center py-4">Loading squads…</p>
+              ) : (
+                [...new Set(allMatches.flatMap(m => [m.team_a_name, m.team_b_name]))].sort().map(team => {
+                  const isExpanded = expandedTeam === team;
+                  const draft = squadDraft[team] ?? [];
+                  return (
+                    <div key={team} className="border-b border-white/[0.06] last:border-0">
+                      <button
+                        onClick={() => setExpandedTeam(isExpanded ? null : team)}
+                        className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-white/[0.02]"
+                      >
+                        <span className="text-sm text-llr-cream font-medium">{team}</span>
+                        <span className="text-xs text-llr-muted">
+                          {draft.length} players {isExpanded ? '▲' : '▶'}
+                        </span>
+                      </button>
+
+                      {isExpanded && (
+                        <div className="px-4 pb-3 space-y-1.5">
+                          {draft.map((name, idx) => (
+                            <div key={idx} className="flex gap-2 items-center">
+                              <input
+                                className="flex-1 bg-llr-ink rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-llr-saffron/35 border border-white/10 text-llr-cream"
+                                value={name}
+                                onChange={e => {
+                                  const updated = [...draft];
+                                  updated[idx] = e.target.value;
+                                  setSquadDraft(p => ({ ...p, [team]: updated }));
+                                }}
+                              />
+                              <button
+                                onClick={() => {
+                                  setSquadDraft(p => ({
+                                    ...p,
+                                    [team]: draft.filter((_, i) => i !== idx),
+                                  }));
+                                }}
+                                className="text-llr-brick hover:text-red-400 text-xl leading-none px-1 flex-shrink-0"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                          <button
+                            onClick={() => setSquadDraft(p => ({ ...p, [team]: [...draft, ''] }))}
+                            className="text-xs text-llr-saffron-glow/70 hover:text-llr-saffron-glow py-1 block"
+                          >
+                            + Add player
+                          </button>
+                          <button
+                            disabled={savingSquad === team}
+                            onClick={async () => {
+                              if (!token) return;
+                              setSavingSquad(team);
+                              try {
+                                const cleaned = draft.filter(Boolean);
+                                await saveTeamSquad(token, team, cleaned);
+                                setSquadDraft(p => ({ ...p, [team]: cleaned }));
+                                showToast(`${team} squad saved`);
+                              } catch (err) {
+                                if (err instanceof AuthError) { kickToLogin(); return; }
+                                showToast('Save failed');
+                              } finally { setSavingSquad(null); }
+                            }}
+                            className="w-full py-2 rounded-lg bg-llr-saffron/15 hover:bg-llr-saffron/25 text-llr-saffron-glow border border-llr-saffron/30 text-sm font-display font-semibold transition disabled:opacity-40 mt-1"
+                          >
+                            {savingSquad === team ? 'Saving…' : 'Save Squad'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
           )}

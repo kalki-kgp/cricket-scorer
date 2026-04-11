@@ -30,9 +30,10 @@ const colMigrations = [
   "ALTER TABLE match ADD COLUMN time_slot     TEXT    NOT NULL DEFAULT ''",
   "ALTER TABLE match ADD COLUMN match_order   INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE match ADD COLUMN is_completed  INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE match ADD COLUMN is_paused     INTEGER NOT NULL DEFAULT 0",
 ];
 
-const colNames = ['time_slot', 'match_order', 'is_completed'];
+const colNames = ['time_slot', 'match_order', 'is_completed', 'is_paused'];
 
 colNames.forEach((col, i) => {
   if (!existingCols.includes(col)) {

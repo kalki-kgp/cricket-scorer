@@ -67,4 +67,39 @@ if (isStale) {
   console.log(`[seed] Tournament data already present (${existingCount} matches) — skipping.`);
 }
 
+// ── Team squads ────────────────────────────────────────────────
+const TEAM_PLAYERS = {
+  'Sultanate':       ['Navdeep', 'Keshav', 'Divyam', 'Mandeep', 'Ayush', 'Akshat', 'Rahul', 'Aditya', 'Yaman'],
+  'SekCEast Mofos':  ['Ayush', 'Sayan', 'Nikhil', 'Revanth', 'Saurabh', 'Saptarshi', 'Deepak', 'Mirza', 'Alok'],
+  'Satya-The Don':   ['Satya', 'Soumya', 'Ankit', 'Abhishek', 'Sagnik', 'Sahil', 'Sohan', 'Ankit B', 'Harshil'],
+  'Telugu Models':   ['Tharun', 'Kushal', 'Eswar', 'Srinu', 'Mahender', 'Revanth', 'Sandeep', 'Gaurav'],
+  'HUKUMAT':         ['Sujan', 'Arman Barik', 'Krishna Chaudhary', 'Vivek Patel', 'Suryansh Singh', 'Soham Jagtap', 'Naidu', 'Zubair'],
+  '2024 Winners':    ['Sharwan', 'Akash', 'Kartik', 'Naidu', 'Ganaeshwer', 'Sumit', 'Hitesh'],
+  'Strong Wing':     ['Anmol Dureja', 'Daksh Dadeech', 'Eashaan Vyas', 'Ishan Singh', 'Moulik Mishra', 'Sneh Shekhar', 'Yash Gupta'],
+  'Charsi':          ['Suraj Kumar', 'Vikrant Bagra', 'Jai Raj', 'Akash', 'Sneh Shekhar', 'Omkar Karkhile', 'Shiv'],
+  'Chuchi Lovers':   ['Saurav', 'Venugopal', 'Devansh', 'Himesh', 'Soumadip', 'Harsh', 'Suvam'],
+  'Sutta Gang':      ['Lalit', 'Sarthak', 'Milind', 'Tejaswi', 'Soham', 'Aritra', 'Suthirth', 'Afrin', 'Abhishek'],
+  'Peace Makers':    ['Metla Gautam', 'Abhiram Reddy', 'Pabitra', 'Shree Hari', 'Avinash', 'Gunda Gnanesh', 'Prabhav', 'Subham'],
+  'Telugu Blasters': ['Ajay', 'Abhiram Naik', 'Vishal B', 'Santosh', 'Srikant', 'Chandu', 'Mohan', 'Yashwant'],
+  'Chess Champion':  ['Archit', 'Nadish', 'Nikhil', 'Siddhant', 'Ishan', 'Sanskar', 'Yogesh Singh', 'Naveen'],
+  'Akram Blasters':  ['Devansh', 'Jagtar', 'Amish', 'Vishesh', 'Shreyash', 'Vishal Pratap', 'Ayush', 'Yogesh Khatri'],
+};
+
+const playerCount = db.prepare('SELECT COUNT(*) as c FROM team_players').get().c;
+
+if (playerCount === 0) {
+  console.log('[seed] Seeding team squads...');
+  const insertPlayer = db.prepare('INSERT INTO team_players (team_name, player_name) VALUES (?, ?)');
+  db.transaction(() => {
+    for (const [team, players] of Object.entries(TEAM_PLAYERS)) {
+      for (const name of players) {
+        insertPlayer.run(team, name);
+      }
+    }
+  })();
+  console.log('[seed] Squads seeded.');
+} else {
+  console.log(`[seed] Squad data already present (${playerCount} players) — skipping.`);
+}
+
 console.log('[seed] Done. Delete data/cricket.db to fully reset.');

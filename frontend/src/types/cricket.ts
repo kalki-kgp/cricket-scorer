@@ -11,6 +11,7 @@ export interface Match {
   balls_in_over: number;
   last_ball_result: string;
   is_live: number;
+  is_paused: number;
   is_completed: number;
 }
 

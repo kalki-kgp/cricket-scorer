@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS match (
   balls_in_over  INTEGER NOT NULL DEFAULT 0,
   last_ball_result TEXT  NOT NULL DEFAULT '',
   is_live        INTEGER NOT NULL DEFAULT 0,
+  is_paused      INTEGER NOT NULL DEFAULT 0,
   is_completed   INTEGER NOT NULL DEFAULT 0
 );
 
@@ -40,4 +41,10 @@ CREATE TABLE IF NOT EXISTS users (
   user_id       INTEGER PRIMARY KEY AUTOINCREMENT,
   username      TEXT    NOT NULL UNIQUE,
   password_hash TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS team_players (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_name   TEXT    NOT NULL,
+  player_name TEXT    NOT NULL
 );

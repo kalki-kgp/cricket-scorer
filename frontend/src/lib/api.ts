@@ -89,6 +89,28 @@ export function setMatchLive(token: string, match_id: number) {
   return authedPost(`/matches/${match_id}/set-live`, token, {});
 }
 
+export function pauseMatch(token: string, match_id: number) {
+  return authedPost(`/matches/${match_id}/pause`, token, {});
+}
+
+export function resumeMatch(token: string, match_id: number, reset: boolean) {
+  return authedPost(`/matches/${match_id}/resume`, token, { reset });
+}
+
 export function completeMatch(token: string, match_id: number) {
   return authedPost(`/matches/${match_id}/complete`, token, {});
+}
+
+export async function fetchAllSquads(): Promise<Record<string, string[]>> {
+  try {
+    const res = await fetch(`${API_URL}/api/teams`, { cache: 'no-store' });
+    if (!res.ok) return {};
+    return res.json();
+  } catch {
+    return {};
+  }
+}
+
+export function saveTeamSquad(token: string, teamName: string, players: string[]) {
+  return authedPost(`/teams/${encodeURIComponent(teamName)}/players`, token, { players });
 }
